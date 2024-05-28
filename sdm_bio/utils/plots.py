@@ -1,10 +1,11 @@
-import matplotlib.pyplot as plt
-import pandas as pd
 import contextily as ctx
 import geopandas as gpd
+import matplotlib.pyplot as plt
+import pandas as pd
 from shapely.geometry import Point
 
-def plot_points(df: pd.DataFrame):
+
+def plot_points(df: pd.DataFrame, hide_bg_pts: bool = False, *args, **kwargs):
     """
     Plot points on a map within specified latitude and longitude bounds.
 
@@ -26,8 +27,9 @@ def plot_points(df: pd.DataFrame):
     df_2 = df[df['target'] == 0]
     
     # Plot points
-    ax.scatter(df_1['lon'], df_1['lat'], c='r', alpha=0.3, s=1)
-    ax.scatter(df_2['lon'], df_2['lat'], c='b', alpha=0.3, s=1)
+    ax.scatter(df_1['lon'], df_1['lat'], c='r', alpha=0.3, s=1, *args, **kwargs)
+    if not hide_bg_pts:
+        ax.scatter(df_2['lon'], df_2['lat'], c='b', alpha=0.3, s=1, *args, **kwargs)
     
     # Add basemap
     ctx.add_basemap(ax, crs='EPSG:4326', source=ctx.providers.CartoDB.Positron, alpha=1)

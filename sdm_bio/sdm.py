@@ -1,16 +1,19 @@
-import geopandas as gpd
-import pandas as pd
-from shapely.geometry import Point
-from pyimpute import load_training_vector
-from dataclasses import dataclass
-import numpy as np
-import rasterio
-from rasterio.mask import mask
-from pathlib import Path
 import os
-from shapely.ops import cascaded_union
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
 import contextily as ctx
+import geopandas as gpd
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import rasterio
+from pyimpute import load_training_vector
+from rasterio.mask import mask
+from shapely.geometry import Point
+from shapely.ops import cascaded_union
+
 
 @dataclass
 class RasterLayer:
@@ -228,6 +231,84 @@ class SDM:
         """
         Export a DataFrame with raster features.
         Args:
-            geojson (str): Path to
+            geojson (str): _description_
+            explanatory_rasters (list[str]): _description_
+            columns (list[str]): _description_
+            output_file_path (str): _description_
+            response_field (str, optional): _description_. Defaults to "Presence".
         """
+        columns = [raster_layer.name for raster_layer in explanatory_rasters]
+        columns.append("target")
+        rasters = [raster_layer.path for raster_layer in explanatory_rasters]
+
+        train_xs, train_y = load_training_vector(geojson, rasters, response_field="target")
+        df = pd.DataFrame(train_xs)
+        df.loc[:,"target"] = train_y
+        df = df[~df[0].isnull()]
+        df.columns = columns
+
+        df = df.merge(self.presence_absence_df[['lon','lat']], left_index=True, right_index=True)
+        df.drop_duplicates().to_parquet(output_file_path)
         return
+    
+    def generate_uniform_points_within_polygon(self, spacing: float = 0.5, target: int = 0, overwrite: bool = True):
+        # Step 1: Determine the bounding box of the polygon
+        bbox = self.geometry.geometry.total_bounds
+        min_x, min_y, max_x, max_y = bbox
+
+        # Step 2: Generate uniformly distributed points within the bounding box
+        x_coords = np.arange(min_x, max_x, spacing)
+        y_coords = np.arange(min_y, max_y, spacing)
+        xx, yy = np.meshgrid(x_coords, y_coords)
+        points = [Point(x, y) for x, y in zip(xx.ravel(), yy.ravel())]
+
+        # Step 3: Filter out points that fall outside the polygon
+        points_within_polygon = [point for point in points if self.geometry.geometry.contains(point).any()]
+
+        # Step 4: Convert the filtered points into a Pandas DataFrame
+        points_df = gpd.GeoDataFrame(geometry=points_within_polygon, crs=self.geometry.crs)
+        points_df['lon'] = points_df.geometry.x
+        points_df['lat'] = points_df.geometry.y
+        points_df['target'] = target
+        points_df.drop(columns='geometry', inplace=True)
+        if overwrite:
+            self._backup = self.random_points_generated
+            self.random_points_generated = points_df
+        return points_df
+    
+    def generate_features_dataframe(
+    self,
+    data_path: str,
+    raster_file_path: list[str],
+    raster_file_cols: list[str],
+    n_random_points: int = 5_000,
+    spacing: float = 0.1,
+    random_points: bool = True
+    ) -> pd.DataFrame:
+        execution_date = datetime.now().strftime("%d-%m-%Y-%H%M")
+        
+        if not os.path.exists(os.path.join(data_path, execution_date + "/")):
+            created_dir = os.path.join(data_path, execution_date + "/")
+            os.mkdir(created_dir)
+            data_path = created_dir
+        if random_points:
+            _df = self.generate_random_points(n_points = n_random_points)
+        else:
+            _df = self.generate_uniform_points_within_polygon(spacing=spacing)
+            
+        self.presence_absence_df.to_parquet(os.path.join(data_path, "random_data.parquet"))
+        raster_layers = []
+        for col, path  in zip(raster_file_cols,raster_file_path):
+            with rasterio.open(path) as src:
+                raster_layers.append(RasterLayer(name=col, path=path, no_data=src.nodata))
+                
+        pd.DataFrame(raster_layers).to_parquet(os.path.join(data_path,"raster_info.parquet"))
+        self.export_self_geoframe_to_json(os.path.join(data_path, "presence_absence.json"))
+
+        self.export_dataframe_with_raster_features(
+            os.path.join(data_path, "presence_absence.json"),
+            explanatory_rasters=raster_layers,
+            output_file_path=os.path.join(data_path, "features.parquet")
+        )
+
+        return pd.read_parquet(os.path.join(data_path, "features.parquet"))
