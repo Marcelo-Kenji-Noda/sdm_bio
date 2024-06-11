@@ -373,6 +373,7 @@ class SDM:
         spacing: float = 0.1,
         random_points: bool = True,
         use_convex_polygon: bool = True,
+        features_path: str = "OUTPUT/features.parquet"
     ) -> pd.DataFrame:
         execution_date = datetime.now().strftime("%d-%m-%Y")
 
@@ -415,7 +416,7 @@ class SDM:
         self.export_dataframe_with_raster_features(
             os.path.join(data_path, "INFO/presence_absence.json"),
             explanatory_rasters=raster_layers,
-            output_file_path=os.path.join(data_path, "OUTPUT/features.parquet"),
+            output_file_path=os.path.join(data_path, features_path),
         )
 
-        return pd.read_parquet(os.path.join(data_path, "OUTPUT/features.parquet"))
+        return pd.read_parquet(os.path.join(data_path, features_path))
